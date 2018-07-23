@@ -8,8 +8,7 @@ otp_release:
 services: docker
 notifications:
   recipients:
-    - elixmoon@gmail.com
-    - jquadrin@gmail.com
+    - drincruz@gmail.com
 sudo: false
 env:
     global:
