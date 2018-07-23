@@ -5,21 +5,23 @@ defmodule Mariaex.Messages do
   use Mariaex.Coder
   require Decimal
 
-  @protocol_vsn_major 3
-  @protocol_vsn_minor 0
+  # @protocol_vsn_major 3
+  # @protocol_vsn_minor 0
 
   defrecord :packet, [:size, :seqnum, :msg, :body]
 
 
   @auth_types [ ok: 0, kerberos: 2, cleartext: 3, md5: 5, scm: 6, gss: 7,
                 sspi: 9, gss_cont: 8 ]
+  _ = @auth_types # Drop warning for now
 
   @error_fields [ severity: ?S, code: ?C, message: ?M, detail: ?D, hint: ?H,
                   position: ?P, internal_position: ?p, internal_query: ?q,
                   where: ?W, schema: ?s, table: ?t, column: ?c, data_type: ?d,
                   constraint: ?n, file: ?F, line: ?L, routine: ?R ]
+  _ = @error_fields # Drop warning for now
 
-  @commands [ com_sleep: 0x00, com_quit: 0x01, com_init_bd: 0x02,
+  @commands [ com_sleep: 0x00, com_quit: 0x01, com_init_db: 0x02,
               com_query: 0x03, com_field_list: 0x04, com_create_db: 0x05,
               com_drop_db: 0x06, com_refresh: 0x07, com_shutdown: 0x08,
               com_statistics: 0x09, com_process_info: 0x0a, com_connect: 0x0b,
@@ -65,6 +67,10 @@ defmodule Mariaex.Messages do
             field_type_blob: 0xfc,
             field_type_var_string: 0xfd,
             field_type_string: 0xfe],
+          json:
+           [field_type_json: 0xf5],
+          geometry:
+            [field_type_geometry: 0xff],
           null:
            [field_type_null: 0x06]
          ]
@@ -90,7 +96,7 @@ defmodule Mariaex.Messages do
     status_flags 2
     capability_flags_2 2
     # length_auth_plugin_data and the following ten bytes in the spec are rolled into the following field
-    auth_plugin_data2 :auth_plugin_data2  #max(13, length_auth_plugin_data - 8), :string
+    auth_plugin_data2 {__MODULE__, :auth_plugin_data2}
     plugin :string_eof
   end
 
@@ -163,7 +169,18 @@ defmodule Mariaex.Messages do
     parameters :string_eof
   end
 
+  defcoder :stmt_fetch do
+    command 1
+    statement_id 4
+    num_rows 4
+  end
+
   defcoder :stmt_close do
+    command 1
+    statement_id 4
+  end
+
+  defcoder :stmt_reset do
     command 1
     statement_id 4
   end
@@ -215,6 +232,36 @@ defmodule Mariaex.Messages do
   def decode(rest, _state),
     do: {nil, rest}
 
+  def decode_bin_rows(<< len :: size(24)-little-integer, seqnum :: size(8)-integer, body :: size(len)-binary, rest :: binary>>,
+                      fields, nullbin_size, rows, datetime, json_library) do
+    case body do
+      <<0 :: 8, nullbin::size(nullbin_size)-little-unit(8), values :: binary>> ->
+        row = Mariaex.RowParser.decode_bin_rows(values, fields, nullbin, datetime, json_library)
+        decode_bin_rows(rest, fields, nullbin_size, [row | rows], datetime, json_library)
+      body ->
+        msg = decode_msg(body, :bin_rows)
+        {:ok, packet(size: len, seqnum: seqnum, msg: msg, body: body), rows, rest}
+    end
+  end
+  def decode_bin_rows(<<rest :: binary>>, _fields, _nullbin_size, rows, _datetime, _json_library) do
+    {:more, rows, rest}
+  end
+
+  def decode_text_rows(<< len :: size(24)-little-integer, seqnum :: size(8)-integer, body :: size(len)-binary, rest :: binary>>,
+                      fields, rows, datetime, json_library) do
+    case body do
+      << 254 :: 8, _ :: binary >> = body when byte_size(body) < 9 ->
+        msg = decode_msg(body, :text_rows)
+        {:ok, packet(size: len, seqnum: seqnum, msg: msg, body: body), rows, rest}
+      body ->
+        row = Mariaex.RowParser.decode_text_rows(body, fields, datetime, json_library)
+        decode_text_rows(rest, fields, [row | rows], datetime, json_library)
+    end
+  end
+  def decode_text_rows(<<rest :: binary>>, _fields, rows, _datetime, _json_library) do
+    {:more, rows, rest}
+  end
+
   defp decode_msg(<< 255 :: 8, _ :: binary >> = body, _),                          do: __decode__(:error_resp, body)
   defp decode_msg(body, :handshake),                                               do: __decode__(:handshake, body)
   defp decode_msg(<< 0 :: 8, _ :: binary >> = body, :bin_rows),                    do: __decode__(:bin_row, body)
@@ -222,7 +269,25 @@ defmodule Mariaex.Messages do
   defp decode_msg(<< 0 :: 8, _ :: binary >> = body, _),                            do: __decode__(:ok_resp, body)
   defp decode_msg(<< 254 >> = _body, _),                                           do: :mysql_old_password
   defp decode_msg(<< 254 :: 8, _ :: binary >> = body, _) when byte_size(body) < 9, do: __decode__(:eof_resp, body)
+<<<<<<< HEAD
   defp decode_msg(<< _ :: binary >> = body, :text_rows),                    do: __decode__(:text_row, body)
+=======
+  defp decode_msg(<< _ :: binary >> = body, :text_rows),                           do: __decode__(:text_row, body)
+>>>>>>> mariaex/master
   defp decode_msg(body, :column_count),                                            do: __decode__(:column_count, body)
   defp decode_msg(body, :column_definitions),                                      do: __decode__(:column_definition_41, body)
+
+  @doc """
+  Decode auth plugin data2, which need some additional context checking.
+  """
+  def auth_plugin_data2(<< length_auth_plugin_data :: 8, _ :: 80, next :: binary >>) do
+    length = max(13, length_auth_plugin_data - 8)
+    length_nul_terminated = length - 1
+    << null_terminated? :: size(length)-binary, next :: binary >> = next
+    auth_plugin_data2 = case null_terminated? do
+                          << contents :: size(length_nul_terminated)-binary, 0 :: 8 >> -> contents
+                          contents -> contents
+                        end
+    {String.trim(auth_plugin_data2, "\0"), next}
+  end
 end

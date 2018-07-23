@@ -1,5 +1,37 @@
 defmodule Mariaex.Coder do
+  @moduledoc """
+  Declarative generator for MySQL protocol messages, which can generate based on declarative description
+  decoder and encoder.
 
+  Example:
+
+        defcoder :text_cmd do
+          command 1
+          statement :string_eof
+        end
+
+  Will generate 2 functions:
+
+      __encode__({:text_cmd, 0x0e, "test"}) # => <<14, 116, 101, 115, 116>>
+
+      __decode__(:text_cmd, <<14, 116, 101, 115, 116>>) # => {:text_cmd, 14, "test"}
+
+  Additionally it generates record, like `Record.record(:text_cmd, [:command, :statement])`,
+  so that you can use it to create commands or access information in it.
+
+  Example would be: `text_cmd(command: 14, statement: "test")`
+
+  Check `Mariaex.Messages` for more examples.
+
+  For now, there is possible to insert custom functions for decoding of data. Example is in handshake
+  command:
+
+  See definition and implementation:
+
+      `auth_plugin_data2: {__MODULE__, auth_plugin_data2}`
+
+  It is used only for decoding, but it may change in the future for encoding.
+  """
   defmacro __using__(_opts) do
     quote do
       import Mariaex.Coder, only: [defcoder: 2]
@@ -101,8 +133,8 @@ defmodule Mariaex.Coder do
     end
   end
 
-  defp gen_body({key, _, [:auth_plugin_data2]}, _) do
-    quote do: {unquote(Macro.var(key, nil)), next} = auth_plugin_data2(next)
+  defp gen_body({key, _, [{module, function}]}, _) do
+    quote do: {unquote(Macro.var(key, nil)), next} = apply(unquote(module), unquote(function), [next])
   end
 
   defp gen_body({key, _, [:length_encoded_integer]}, _) do
@@ -173,6 +205,10 @@ defmodule Mariaex.Coder do
     [(quote do: unquote(Macro.var(key, nil)) :: binary)]
   end
   defp match({key, _, [:length_encoded_string | _]}, :encode) do
+    [(quote do: unquote(Macro.var(key, nil)) :: binary)]
+  end
+  # All custom implementations are ignored yet
+  defp match({key, _, [{_module, _function}]}, :encode) do
     [(quote do: unquote(Macro.var(key, nil)) :: binary)]
   end
 

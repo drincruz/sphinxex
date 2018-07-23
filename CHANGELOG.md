@@ -1,3 +1,49 @@
+# 0.8.3
+
+* Enhancements
+  * use CLIENT_DEPRECATE_EOF flag to make decision about EOF messages
+  * travis tests on different mariadb/mysql versions
+  * introduce :query_type prepare option
+  * fix typo in protocol handle_declare
+
+* Bug fixes
+  * fix close socket when disconnect failed
+  * do disconnect on handshake error
+
+# 0.8.2
+
+* Enhancements
+  * remove warnings for elixir v1.4
+
+* Bug fixes
+  * fix some bugs on reconnection
+
+# 0.8.1
+
+* Enhancements
+  * better performance on decoding multiple rows
+  * add support for non-microsecond datetimes
+
+* Bug fixes
+  * fix error when executing a stored procedure that does not return any results
+
+# 0.8.0
+
+* Enhancements
+  * add MDBPORT enviroment
+  * add streaming support
+
+* Backwards incompatible changes
+  * remove support of elixir < 1.2
+
+# 0.7.9
+
+* Enhancements
+  * different performance optimization of query handling
+
+* Bug fixes
+  * fix truncate query
+
 # 0.7.8
 
 * Enhancements
@@ -140,7 +186,7 @@
   * allow saving dates, that have year less as 1000, due time is another format as date
 
 * Backwards incompatible changes
-  * tiny integers are no more automaticly decoded as booleans
+  * tiny integers are no more automatically decoded as booleans
 
 # 0.2.2
 
